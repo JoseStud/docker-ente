@@ -1,0 +1,136 @@
+version: '3.8'
+
+services:
+  ente-web:
+    image: enteweb:latest
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+    restart: always
+    networks:
+      - ngnix_default
+
+  museum:
+    image: museum:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENTE_CREDENTIALS_FILE: /credentials.yaml
+    configs:
+      - source: credentials_yaml
+        target: /credentials.yaml
+    volumes:
+      - custom-logs:/var/logs
+      - ./museum.yaml:/museum.yaml:ro
+      - ./data:/data:ro
+    networks:
+      - ngnix_default
+    restart: always
+
+  socat:
+    image: alpine/socat
+    networks:
+      - ngnix_default
+    depends_on:
+      - museum
+      - minio
+    command: "TCP-LISTEN:3200,fork,reuseaddr TCP:minio:3200"
+    restart: always
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "${POSTGRES_DB}", "-U", "${POSTGRES_USER}"]
+      start_period: 40s
+      start_interval: 1s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ngnix_default
+    restart: always
+
+  minio:
+    image: minio/minio
+    ports:
+      - "3200:3200"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --address ":3200" --console-address ":3201"
+    volumes:
+      - minio-data:/data
+    networks:
+      - ngnix_default
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_started
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - socat
+      - minio
+      - museum
+      - postgres
+      - ente-web
+    networks:
+      - ngnix_default
+    restart: unless-stopped
+
+configs:
+  credentials_yaml:
+    content: |
+      db:
+          host: postgres
+          port: 5432
+          name: ${POSTGRES_DB}
+          user: ${POSTGRES_USER}
+          password: ${POSTGRES_PASSWORD}
+
+      s3:
+          are_local_buckets: true
+          b2-eu-cen:
+              key: ${S3_KEY}
+              secret: ${S3_SECRET}
+              endpoint: https://bucket.25thjose.online
+              region: eu-central-2
+              bucket: b2-eu-cen
+          wasabi-eu-central-2-v3:
+              key: ${S3_KEY}
+              secret: ${S3_SECRET}
+              endpoint: https://bucket.25thjose.online
+              region: eu-central-2
+              bucket: wasabi-eu-central-2-v3
+              compliance: false
+          scw-eu-fr-v3:
+              key: ${S3_KEY}
+              secret: ${S3_SECRET}
+              endpoint: https://bucket.25thjose.online
+              region: eu-central-2
+              bucket: scw-eu-fr-v3
+
+volumes:
+  custom-logs:
+  postgres-data:
+  minio-data:
+
+networks:
+  ngnix_default:
+    driver: bridge
