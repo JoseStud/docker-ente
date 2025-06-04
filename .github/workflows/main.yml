@@ -19,7 +19,7 @@ jobs:
 
       - name: Generate credentials.yaml
         run: |
-          envsubst < credentials.yaml.template > credentials.yaml
+          envsubst < docker-compose-app/credentials.yaml.template > credentials.yaml
         env:
           POSTGRES_USER: pguser
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
